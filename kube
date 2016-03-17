@@ -28,7 +28,7 @@ function check_prerequisites {
     require_command_exists docker
     docker info > /dev/null
     if [ $? != 0 ]; then
-        echo "A running Docker engine is required. Is your Docker host up?"
+        echo A running Docker engine is required. Is your Docker host up?
         exit 1
     fi
 }
@@ -47,7 +47,7 @@ function forward_port_if_not_forwarded {
         if ! pgrep -f "ssh.*$port:localhost" > /dev/null; then
             docker-machine ssh "$machine" -f -N -L "$port:localhost:$port"
         else
-            echo "Did not set up port forwarding to the Docker machine: An ssh tunnel on port $port already exists. The kubernetes cluster may not be reachable from local kubectl."
+            echo Did not set up port forwarding to the Docker machine: An ssh tunnel on port $port already exists. The kubernetes cluster may not be reachable from local kubectl.
         fi
     fi
 }
@@ -58,14 +58,15 @@ function remove_port_if_forwarded {
 }
 
 function wait_for_kubernetes {
-    echo "Waiting for Kubernetes cluster to become available..."
+    echo Waiting for Kubernetes cluster to become available...
     until $(kubectl cluster-info &> /dev/null); do
         sleep 1
     done
-    echo "Kubernetes cluster is up."
+    echo Kubernetes cluster is up.
 }
 
 function create_kube_system_namespace {
+    # TODO: Suppress output
     kubectl create -f - << EOF
 kind: Namespace
 apiVersion: v1
@@ -77,6 +78,7 @@ EOF
 }
 
 function activate_kubernetes_dashboard {
+    # TODO: Suppress output
     kubectl create -f - << EOF
 kind: List
 apiVersion: v1
@@ -140,6 +142,11 @@ EOF
 function start_kubernetes {
     check_prerequisites
 
+    if kubectl cluster-info 2> /dev/null; then
+        echo kubectl is already configured to use an existing cluster
+        exit 1
+    fi
+
     docker run \
         --volume=/:/rootfs:ro \
         --volume=/sys:/sys:ro \
@@ -180,12 +187,13 @@ function delete_kubernetes_resources {
 }
 
 function delete_docker_containers {
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker kill {}
-    docker kill $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0) || :
-    docker kill $(docker ps -aq -f=name=k8s_) || :
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker rm {}
-    docker rm $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0)
-    docker rm $(docker ps -aq -f=name=k8s_)
+    # TODO: Suppress all output, including errors
+    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker kill {} > /dev/null 2>&1
+    docker kill $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0) || : > /dev/null 2>&1
+    docker kill $(docker ps -aq -f=name=k8s_) || : /dev/null 2>&1
+    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker rm {} > /dev/null 2>&1
+    docker rm $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0) > /dev/null 2>&1
+    docker rm $(docker ps -aq -f=name=k8s_) > /dev/null 2>&1
 }
 
 function stop_kubernetes {
