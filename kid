@@ -1,6 +1,9 @@
 #!/bin/bash
 #
-# Helper script for launching Kubernetes in Docker
+# kid is a helper script for launching Kubernetes in Docker
+#
+# TODO: Add a status command?
+# TODO: Improvements documented throughout this file
 
 KUBERNETES_VERSION=1.2.0
 KUBERNETES_API_PORT=8080
@@ -9,9 +12,9 @@ set -e
 
 function print_usage {
     cat << EOF
-kube is a utility for launching Kubernetes in Docker
+kid is a utility for launching Kubernetes in Docker
 
-Usage: $0 [command]
+Usage: kid [command]
 
 Available commands:
   up    Starts Kubernetes in the Docker host currently configured with your local docker command
