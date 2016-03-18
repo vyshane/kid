@@ -3,10 +3,10 @@
 # kid is a helper script for launching Kubernetes in Docker
 #
 # TODO: Add a status command?
-# TODO: Improvements documented throughout this file
 
 KUBERNETES_VERSION=1.2.0
 KUBERNETES_API_PORT=8080
+KUBERNETES_DASHBOARD_NODEPORT=31999
 
 set -e
 
@@ -55,7 +55,7 @@ function forward_port_if_not_forwarded {
     fi
 }
 
-function remove_port_if_forwarded {
+function remove_port_forward_if_forwarded {
     local port=$1
     pkill -f "ssh.*docker.*$port:localhost:$port"
 }
@@ -65,12 +65,11 @@ function wait_for_kubernetes {
     until $(kubectl cluster-info &> /dev/null); do
         sleep 1
     done
-    echo Kubernetes cluster is up.
+    echo Kubernetes cluster is up. The Kubernetes dashboard can be accessed via HTTP at port $KUBERNETES_DASHBOARD_NODEPORT of your Docker host.
 }
 
 function create_kube_system_namespace {
-    # TODO: Suppress output
-    kubectl create -f - << EOF
+    kubectl create -f - << EOF > /dev/null
 kind: Namespace
 apiVersion: v1
 metadata:
@@ -81,8 +80,8 @@ EOF
 }
 
 function activate_kubernetes_dashboard {
-    # TODO: Suppress output
-    kubectl create -f - << EOF
+    kubectl create -f - << EOF > /dev/null
+# Source: https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/kubernetes-dashboard-canary.yaml
 kind: List
 apiVersion: v1
 items:
@@ -135,7 +134,7 @@ items:
     ports:
     - port: 80
       targetPort: 9090
-      nodePort: 31999
+      nodePort: $KUBERNETES_DASHBOARD_NODEPORT  # Addition. Not present in upstream definition.
     selector:
       app: kubernetes-dashboard-canary
     type: NodePort
@@ -170,7 +169,7 @@ function start_kubernetes {
             --cluster-dns=10.0.0.10 \
             --cluster-domain=cluster.local \
             --allow-privileged=true --v=2 \
-	> /dev/null
+	    > /dev/null
 
     forward_port_if_not_forwarded $KUBERNETES_API_PORT
     wait_for_kubernetes
@@ -179,8 +178,7 @@ function start_kubernetes {
 }
 
 function delete_kubernetes_resources {
-    # TODO: Find a guaranteed way to delete all the resources.
-    # Do we need to delete them in specific a order?
+    # TODO: Implement a more robust way to ensure that all resources have been deleted before killing the k8s Docker containers.
     kubectl delete replicationcontrollers,services,pods,secrets --all
     sleep 3
     kubectl delete replicationcontrollers,services,pods,secrets --all --namespace=kube-system
@@ -190,19 +188,18 @@ function delete_kubernetes_resources {
 }
 
 function delete_docker_containers {
-    # TODO: Suppress all output, including errors
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker kill {} > /dev/null 2>&1
-    docker kill $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0) || : > /dev/null 2>&1
-    docker kill $(docker ps -aq -f=name=k8s_) || : /dev/null 2>&1
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker rm {} > /dev/null 2>&1
-    docker rm $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v1.2.0) > /dev/null 2>&1
-    docker rm $(docker ps -aq -f=name=k8s_) > /dev/null 2>&1
+    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker kill {}
+    docker kill $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v$KUBERNETES_VERSION) || :
+    docker kill $(docker ps -aq -f=name=k8s_) || :
+    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker rm {}
+    docker rm $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v$KUBERNETES_VERSION)
+    docker rm $(docker ps -aq -f=name=k8s_)
 }
 
 function stop_kubernetes {
     delete_kubernetes_resources
-    delete_docker_containers
-    remove_port_if_forwarded $KUBERNETES_API_PORT
+    delete_docker_containers > /dev/null 2>&1 &
+    remove_port_forward_if_forwarded $KUBERNETES_API_PORT
 }
 
 if [ "$1" == "up" ]; then
