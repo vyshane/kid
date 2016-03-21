@@ -17,8 +17,9 @@ kid is a utility for launching Kubernetes in Docker
 Usage: kid [command]
 
 Available commands:
-  up    Starts Kubernetes in the Docker host currently configured with your local docker command
-  down  Tear down a previously started Kubernetes cluster
+  up       Starts Kubernetes in the Docker host currently configured with your local docker command
+  down     Tear down a previously started Kubernetes cluster
+  restart  Restart Kubernetes
 EOF
 }
 
@@ -42,7 +43,7 @@ function active_docker_machine {
     fi
 }
 
-function forward_port_if_not_forwarded {
+function forward_port_if_necessary {
     local port=$1
     local machine=$(active_docker_machine)
 
@@ -61,11 +62,9 @@ function remove_port_forward_if_forwarded {
 }
 
 function wait_for_kubernetes {
-    echo Waiting for Kubernetes cluster to become available...
     until $(kubectl cluster-info &> /dev/null); do
         sleep 1
     done
-    echo Kubernetes cluster is up. The Kubernetes dashboard can be accessed via HTTP at port $KUBERNETES_DASHBOARD_NODEPORT of your Docker host.
 }
 
 function create_kube_system_namespace {
@@ -80,6 +79,7 @@ EOF
 }
 
 function activate_kubernetes_dashboard {
+    local dashboard_service_nodeport=$1
     kubectl create -f - << EOF > /dev/null
 # Source: https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/kubernetes-dashboard-canary.yaml
 kind: List
@@ -134,7 +134,7 @@ items:
     ports:
     - port: 80
       targetPort: 9090
-      nodePort: $KUBERNETES_DASHBOARD_NODEPORT  # Addition. Not present in upstream definition.
+      nodePort: $dashboard_service_nodeport  # Addition. Not present in upstream definition.
     selector:
       app: kubernetes-dashboard-canary
     type: NodePort
@@ -142,6 +142,9 @@ EOF
 }
 
 function start_kubernetes {
+    local kubernetes_version=$1
+    local kubernetes_api_port=$2
+    local dashboard_service_nodeport=$3
     check_prerequisites
 
     if kubectl cluster-info 2> /dev/null; then
@@ -150,6 +153,7 @@ function start_kubernetes {
     fi
 
     docker run \
+        --name=k8s_kubelet \
         --volume=/:/rootfs:ro \
         --volume=/sys:/sys:ro \
         --volume=/var/lib/docker/:/var/lib/docker:rw \
@@ -159,53 +163,62 @@ function start_kubernetes {
         --pid=host \
         --privileged=true \
         -d \
-        gcr.io/google_containers/hyperkube-amd64:v${KUBERNETES_VERSION} \
+        gcr.io/google_containers/hyperkube-amd64:v${kubernetes_version} \
         /hyperkube kubelet \
             --containerized \
             --hostname-override="127.0.0.1" \
             --address="0.0.0.0" \
-            --api-servers=http://localhost:${KUBERNETES_API_PORT} \
+            --api-servers=http://localhost:${kubernetes_api_port} \
             --config=/etc/kubernetes/manifests \
             --cluster-dns=10.0.0.10 \
             --cluster-domain=cluster.local \
             --allow-privileged=true --v=2 \
 	    > /dev/null
 
-    forward_port_if_not_forwarded $KUBERNETES_API_PORT
+    # TODO: Set and use a `kid` Kubernetes context instead of forwarding the port?
+    forward_port_if_necessary $kubernetes_api_port
+
+    echo Waiting for Kubernetes cluster to become available...
     wait_for_kubernetes
     create_kube_system_namespace
-    activate_kubernetes_dashboard
+    activate_kubernetes_dashboard $dashboard_service_nodeport
+    echo Kubernetes cluster is up. The Kubernetes dashboard can be accessed via HTTP at port $dashboard_service_nodeport of your Docker host.
 }
 
 function delete_kubernetes_resources {
-    # TODO: Implement a more robust way to ensure that all resources have been deleted before killing the k8s Docker containers.
-    kubectl delete replicationcontrollers,services,pods,secrets --all
-    sleep 3
-    kubectl delete replicationcontrollers,services,pods,secrets --all --namespace=kube-system
-    sleep 3
-    kubectl delete namespace kube-system || :
-    sleep 3
+    kubectl delete replicationcontrollers,services,pods,secrets --all > /dev/null 2>&1 || :
+    kubectl delete replicationcontrollers,services,pods,secrets --all --namespace=kube-system > /dev/null 2>&1 || :
+    kubectl delete namespace kube-system > /dev/null 2>&1 || :
 }
 
 function delete_docker_containers {
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker kill {}
-    docker kill $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v$KUBERNETES_VERSION) || :
-    docker kill $(docker ps -aq -f=name=k8s_) || :
-    docker ps | awk '{ print $1,$3 }' | grep "/hyperkube" | awk '{print $1 }' | xargs -I {} docker rm {}
-    docker rm $(docker ps -aq -f=ancestor=gcr.io/google_containers/hyperkube-amd64:v$KUBERNETES_VERSION)
-    docker rm $(docker ps -aq -f=name=k8s_)
+    # Remove the kubelet first so that it doesn't restart pods that we're going to remove next
+    docker stop k8s_kubelet > /dev/null 2>&1
+    docker rm -fv k8s_kubelet > /dev/null 2>&1
+
+    k8s_containers=$(docker ps -aqf "name=k8s_")
+    if [ ! -z "$k8s_containers" ]; then
+        docker stop $k8s_containers > /dev/null 2>&1
+        docker wait $k8s_containers > /dev/null 2>&1
+        docker rm -fv $k8s_containers > /dev/null 2>&1
+    fi
 }
 
 function stop_kubernetes {
+    local kubernetes_api_port=$1
     delete_kubernetes_resources
-    delete_docker_containers > /dev/null 2>&1 &
-    remove_port_forward_if_forwarded $KUBERNETES_API_PORT
+    delete_docker_containers
+    remove_port_forward_if_forwarded $kubernetes_api_port
 }
 
 if [ "$1" == "up" ]; then
-    start_kubernetes
+    start_kubernetes $KUBERNETES_VERSION $KUBERNETES_API_PORT $KUBERNETES_DASHBOARD_NODEPORT
 elif [ "$1" == "down" ]; then
-    stop_kubernetes
+    # TODO: Ensure current Kubernetes context is set to local Docker (or Docker Machine VM) before downing
+    stop_kubernetes $KUBERNETES_API_PORT
+elif [ "$1" == "restart" ]; then
+    # TODO: Check if not currently running before downing. Show a message if not running.
+    kid down && kid up
 else
     print_usage
 fi
