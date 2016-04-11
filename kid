@@ -1,10 +1,8 @@
 #!/bin/bash
 #
 # kid is a helper script for launching Kubernetes in Docker
-#
-# TODO: Add a status command?
 
-KUBERNETES_VERSION=1.2.0
+KUBERNETES_VERSION=1.2.2
 KUBERNETES_API_PORT=8080
 KUBERNETES_DASHBOARD_NODEPORT=31999
 
