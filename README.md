@@ -20,4 +20,4 @@ On OS X Kubernetes will be started in the boot2docker VM via Docker Machine. kid
 kid also sets up:
 
  * The [DNS addon](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/dns)
- * The [Kubernetes Dashboard](https://github.com/kubernetes/dashboard).
+ * The [Kubernetes Dashboard](https://github.com/kubernetes/dashboard)
