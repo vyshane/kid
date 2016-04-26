@@ -151,7 +151,7 @@ function start_kubernetes {
     fi
 
     docker run \
-        --name=k8s_kubelet \
+        --name=kubelet \
         --volume=/:/rootfs:ro \
         --volume=/sys:/sys:ro \
         --volume=/var/lib/docker/:/var/lib/docker:rw \
@@ -191,8 +191,8 @@ function delete_kubernetes_resources {
 
 function delete_docker_containers {
     # Remove the kubelet first so that it doesn't restart pods that we're going to remove next
-    docker stop k8s_kubelet > /dev/null 2>&1
-    docker rm -fv k8s_kubelet > /dev/null 2>&1
+    docker stop kubelet > /dev/null 2>&1
+    docker rm -fv kubelet > /dev/null 2>&1
 
     k8s_containers=$(docker ps -aqf "name=k8s_")
     if [ ! -z "$k8s_containers" ]; then
