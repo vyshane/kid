@@ -5,6 +5,8 @@
 KUBERNETES_VERSION=1.2.3
 KUBERNETES_API_PORT=8080
 KUBERNETES_DASHBOARD_NODEPORT=31999
+DNS_DOMAIN=cluster.local
+DNS_SERVER_IP=10.0.0.10
 
 set -e
 
@@ -139,10 +141,156 @@ items:
 EOF
 }
 
+function start_dns {
+    local dns_domain=$1
+    local dns_server_ip=$2
+
+    kubectl create -f - << EOF > /dev/null
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: kube-dns-v10
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+    version: v10
+    kubernetes.io/cluster-service: "true"
+spec:
+  replicas: 1
+  selector:
+    k8s-app: kube-dns
+    version: v10
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-dns
+        version: v10
+        kubernetes.io/cluster-service: "true"
+    spec:
+      containers:
+      - name: etcd
+        image: gcr.io/google_containers/etcd-amd64:2.2.1
+        resources:
+          # keep request = limit to keep this container in guaranteed class
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        command:
+        - /usr/local/bin/etcd
+        - -data-dir
+        - /var/etcd/data
+        - -listen-client-urls
+        - http://127.0.0.1:2379,http://127.0.0.1:4001
+        - -advertise-client-urls
+        - http://127.0.0.1:2379,http://127.0.0.1:4001
+        - -initial-cluster-token
+        - skydns-etcd
+        volumeMounts:
+        - name: etcd-storage
+          mountPath: /var/etcd/data
+      - name: kube2sky
+        image: gcr.io/google_containers/kube2sky:1.12
+        resources:
+          # keep request = limit to keep this container in guaranteed class
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        args:
+        # command = "/kube2sky"
+        - --domain=$dns_domain
+      - name: skydns
+        image: gcr.io/google_containers/skydns:2015-10-13-8c72f8c
+        resources:
+          # keep request = limit to keep this container in guaranteed class
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        args:
+        # command = "/skydns"
+        - -machines=http://127.0.0.1:4001
+        - -addr=0.0.0.0:53
+        - -ns-rotate=false
+        - -domain=${dns_domain}.
+        ports:
+        - containerPort: 53
+          name: dns
+          protocol: UDP
+        - containerPort: 53
+          name: dns-tcp
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 1
+          timeoutSeconds: 5
+      - name: healthz
+        image: gcr.io/google_containers/exechealthz:1.0
+        resources:
+          # keep request = limit to keep this container in guaranteed class
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+        args:
+        - -cmd=nslookup kubernetes.default.svc.${dns_domain} 127.0.0.1 >/dev/null
+        - -port=8080
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+      volumes:
+      - name: etcd-storage
+        emptyDir: {}
+      dnsPolicy: Default  # Don't use cluster DNS.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-dns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+    kubernetes.io/cluster-service: "true"
+    kubernetes.io/name: "KubeDNS"
+spec:
+  selector:
+    k8s-app: kube-dns
+  clusterIP: $dns_server_ip
+  ports:
+  - name: dns
+    port: 53
+    protocol: UDP
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+EOF
+}
+
 function start_kubernetes {
     local kubernetes_version=$1
     local kubernetes_api_port=$2
     local dashboard_service_nodeport=$3
+    local dns_domain=$4
+    local dns_server_ip=$5
     check_prerequisites
 
     if kubectl cluster-info 2> /dev/null; then
@@ -168,8 +316,8 @@ function start_kubernetes {
             --address="0.0.0.0" \
             --api-servers=http://localhost:${kubernetes_api_port} \
             --config=/etc/kubernetes/manifests \
-            --cluster-dns=10.0.0.10 \
-            --cluster-domain=cluster.local \
+            --cluster-dns=$DNS_SERVER_IP \
+            --cluster-domain=$DNS_DOMAIN \
             --allow-privileged=true --v=2 \
 	    > /dev/null
 
@@ -179,6 +327,7 @@ function start_kubernetes {
     echo Waiting for Kubernetes cluster to become available...
     wait_for_kubernetes
     create_kube_system_namespace
+    start_dns $dns_domain $dns_server_ip
     activate_kubernetes_dashboard $dashboard_service_nodeport
     echo Kubernetes cluster is up. The Kubernetes dashboard can be accessed via HTTP at port $dashboard_service_nodeport of your Docker host.
 }
@@ -210,7 +359,10 @@ function stop_kubernetes {
 }
 
 if [ "$1" == "up" ]; then
-    start_kubernetes $KUBERNETES_VERSION $KUBERNETES_API_PORT $KUBERNETES_DASHBOARD_NODEPORT
+    start_kubernetes $KUBERNETES_VERSION \
+        $KUBERNETES_API_PORT \
+        $KUBERNETES_DASHBOARD_NODEPORT \
+        $DNS_DOMAIN $DNS_SERVER_IP
 elif [ "$1" == "down" ]; then
     # TODO: Ensure current Kubernetes context is set to local Docker (or Docker Machine VM) before downing
     stop_kubernetes $KUBERNETES_API_PORT
