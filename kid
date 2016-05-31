@@ -63,7 +63,7 @@ function check_prerequisites {
 
 function fix_shared_mount {
   path=$1
-  docker run -it --rm --entrypoint=sh --privileged --net=host -e sysimage=/host -v /:/host -v /dev:/dev -v /run:/run gcr.io/google_containers/hyperkube-amd64:v1.2.4 -c 'nsenter --mount=$sysimage/proc/1/ns/mnt -- mount --make-shared '$path''
+  docker run -it --rm --entrypoint=sh --privileged --net=host -e sysimage=/host -v /:/host -v /dev:/dev -v /run:/run gcr.io/google_containers/hyperkube-amd64:v${KUBERNETES_VERSION} -c 'nsenter --mount=$sysimage/proc/1/ns/mnt -- mount --make-shared '$path''
 }
 
 function active_docker_machine {
@@ -87,11 +87,8 @@ function forward_port_if_necessary {
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
       AVAHI_HOST=docker-mac
-      res=$(docker ps -a -f name=${AVAHI_HOST} | tail -1 | grep -v Restarting)
-      if [ "$res" == "" ]; then
-        docker kill avahi-${AVAHI_HOST} >/dev/null 2>&1 || true ; docker rm avahi-${AVAHI_HOST} >/dev/null 2>&1 || true
-        docker run -d --name avahi-${AVAHI_HOST} --net host --restart always -e AVAHI_HOST=${AVAHI_HOST} danisla/avahi:latest >/dev/null
-      fi
+      docker kill avahi-${AVAHI_HOST} >/dev/null 2>&1 || true ; docker rm avahi-${AVAHI_HOST} >/dev/null 2>&1 || true
+      docker run -d --name avahi-${AVAHI_HOST} --net host --restart always -e AVAHI_HOST=${AVAHI_HOST} danisla/avahi:latest >/dev/null
 
       SCRIPTPATH=$( cd $(dirname $0) ; pwd -P )
       [[ -h $0 ]] && SCRIPTPATH=$(dirname `readlink $0`)
