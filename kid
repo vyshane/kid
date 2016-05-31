@@ -40,10 +40,15 @@ function check_prerequisites {
     if [ $? -eq 0 ]; then
       echo "Docker for Mac detected"
 
-      pinata set native/port-forwarding false >/dev/null
-      if [ $? -ne 0 ]; then
-        echo "error setting pinata native/port-forwarding to false."
-        exit 1
+      if [ "$(pinata get native/port-forwarding)" == "true" ]; then
+        pinata set native/port-forwarding false >/dev/null
+        if [ $? -ne 0 ]; then
+          echo "error setting pinata native/port-forwarding to false."
+          exit 1
+        fi
+        sleep 5
+        docker info >/dev/null 2>&1
+        while [ $? -ne 0 ]; do sleep 1 ; docker info >/dev/null 2>&1; done # wait for docker to come back
       fi
 
       # Mount /var as shared to fix configmaps.
@@ -103,11 +108,25 @@ function remove_port_forward_if_forwarded {
     local port=$1
     pkill -f "ssh.*docker.*$port:localhost:$port"
 
+    # port-forward the canary dashboard.
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
       docker kill kid_ssh >/dev/null 2>&1 || true ; docker rm kid_ssh >/dev/null 2>&1 || true
 
       pkill -f "kubectl.*port-forward.*dashboard-canary.*"
+    fi
+
+    # Reset the port forwarding setting.
+    if [ "$(pinata get native/port-forwarding)" == "false" ]; then
+      echo "reseting Docker for Mac native/port-forwarding = true"
+      pinata set native/port-forwarding true >/dev/null
+      if [ $? -ne 0 ]; then
+        echo "error setting pinata native/port-forwarding to true."
+        exit 1
+      fi
+      sleep 5
+      docker info >/dev/null 2>&1
+      while [ $? -ne 0 ]; do sleep 1 ; docker info >/dev/null 2>&1; done # wait for docker to come back
     fi
 }
 
