@@ -8,7 +8,7 @@ KUBERNETES_DASHBOARD_NODEPORT=31999
 DNS_DOMAIN=cluster.local
 DNS_SERVER_IP=10.0.0.10
 
-set -e
+# set -e
 
 function print_usage {
     cat << EOF
@@ -35,6 +35,17 @@ function check_prerequisites {
         echo A running Docker engine is required. Is your Docker host up?
         exit 1
     fi
+
+    docker info | egrep -q 'Kernel Version: .*-moby'
+    if [ $? -eq 0 ]; then
+      echo "Docker for Mac detected"
+
+      pinata set native/port-forwarding false >/dev/null
+      if [ $? -ne 0 ]; then
+        echo "error setting pinata native/port-forwarding to false."
+        exit 1
+      fi
+    fi
 }
 
 function active_docker_machine {
@@ -54,11 +65,46 @@ function forward_port_if_necessary {
             echo Did not set up port forwarding to the Docker machine: An ssh tunnel on port $port already exists. The kubernetes cluster may not be reachable from local kubectl.
         fi
     fi
+
+    docker info | egrep -q 'Kernel Version: .*-moby'
+    if [ $? -eq 0 ]; then
+      AVAHI_HOST=docker-mac
+      res=$(docker ps -q -f name=${AVAHI_HOST})
+      if [ "$res" == "" ]; then
+        docker run -d --name avahi-${AVAHI_HOST} --net host --restart always -e AVAHI_HOST=${AVAHI_HOST} danisla/avahi:latest >/dev/null
+      fi
+
+      SCRIPTPATH=$( cd $(dirname $0) ; pwd -P )
+      [[ -h $0 ]] && SCRIPTPATH=$(dirname `readlink $0`)
+      SSH_KEY="${SCRIPTPATH}/kid_rsa.key"
+      [[ ! -f "${SSH_KEY}" ]] && ssh-keygen -t rsa -f "${SSH_KEY}" -N '' >/dev/null
+
+      docker run --name kid_ssh -d --net host -v "${SSH_KEY}.pub":/etc/ssh/keys/kid_rsa.key.pub:ro danisla/ssh-server:latest > /dev/null
+      nohup ssh -f -N -i "${SSH_KEY}" -L 8080:localhost:8080 nobody@docker-mac.local >/dev/null 2>&1 &
+    fi
+}
+
+function forward_canary_port_if_necessary {
+  port=$1
+  docker info | egrep -q 'Kernel Version: .*-moby'
+  if [ $? -eq 0 ]; then
+    # Keep port forward alive.
+    nohup bash -c 'while true; do kubectl --namespace kube-system port-forward $(kubectl --namespace kube-system get pod --selector=app=kubernetes-dashboard-canary -o jsonpath={.items..metadata.name}) '$port':9090; sleep 2; done' >/dev/null 2>&1 &
+    nc -z localhost 31999
+    while [ $? -ne 0 ]; do sleep 1 ; nc -z localhost 31999; done
+  fi
 }
 
 function remove_port_forward_if_forwarded {
     local port=$1
     pkill -f "ssh.*docker.*$port:localhost:$port"
+
+    docker info | egrep -q 'Kernel Version: .*-moby'
+    if [ $? -eq 0 ]; then
+      docker kill kid_ssh >/dev/null 2>&1 || true ; docker rm kid_ssh >/dev/null 2>&1 || true
+
+      pkill -f "kubectl.*port-forward.*dashboard-canary.*"
+    fi
 }
 
 function wait_for_kubernetes {
@@ -329,6 +375,9 @@ function start_kubernetes {
     create_kube_system_namespace
     start_dns $dns_domain $dns_server_ip
     activate_kubernetes_dashboard $dashboard_service_nodeport
+
+    forward_canary_port_if_necessary $dashboard_service_nodeport
+
     echo Kubernetes cluster is up. The Kubernetes dashboard can be accessed via HTTP at port $dashboard_service_nodeport of your Docker host.
 }
 
