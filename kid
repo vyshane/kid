@@ -45,6 +45,9 @@ function check_prerequisites {
         echo "error setting pinata native/port-forwarding to false."
         exit 1
       fi
+
+      # Mount /var as shared to fix configmaps.
+      docker run -it --rm --entrypoint=sh --privileged --net=host -e sysimage=/host -v /:/host -v /dev:/dev -v /run:/run gcr.io/google_containers/hyperkube-amd64:v${KUBERNETES_VERSION} -c 'nsenter --mount=$sysimage/proc/1/ns/mnt -- mount --make-shared /var'
     fi
 }
 
@@ -69,8 +72,9 @@ function forward_port_if_necessary {
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
       AVAHI_HOST=docker-mac
-      res=$(docker ps -q -f name=${AVAHI_HOST})
+      res=$(docker ps -a -f name=${AVAHI_HOST} | tail -1 | grep -v Restarting)
       if [ "$res" == "" ]; then
+        docker kill avahi-${AVAHI_HOST} >/dev/null 2>&1 || true ; docker rm avahi-${AVAHI_HOST} >/dev/null 2>&1 || true
         docker run -d --name avahi-${AVAHI_HOST} --net host --restart always -e AVAHI_HOST=${AVAHI_HOST} danisla/avahi:latest >/dev/null
       fi
 
@@ -349,7 +353,7 @@ function start_kubernetes {
         --volume=/:/rootfs:ro \
         --volume=/sys:/sys:ro \
         --volume=/var/lib/docker/:/var/lib/docker:rw \
-        --volume=/var/lib/kubelet/:/var/lib/kubelet:rw \
+        --volume=/var/lib/kubelet/:/var/lib/kubelet:rw,shared \
         --volume=/var/run:/var/run:rw \
         --net=host \
         --pid=host \
