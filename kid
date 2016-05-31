@@ -36,6 +36,11 @@ function check_prerequisites {
         exit 1
     fi
 
+    # Fixed shared mount for docker machine.
+    if [ -n $(active_docker_machine) ]; then
+      fix_shared_mount "/"
+    fi
+
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
       echo "Docker for Mac detected"
@@ -52,8 +57,13 @@ function check_prerequisites {
       fi
 
       # Mount /var as shared to fix configmaps.
-      docker run -it --rm --entrypoint=sh --privileged --net=host -e sysimage=/host -v /:/host -v /dev:/dev -v /run:/run gcr.io/google_containers/hyperkube-amd64:v${KUBERNETES_VERSION} -c 'nsenter --mount=$sysimage/proc/1/ns/mnt -- mount --make-shared /var'
+      fix_shared_mount "/var"
     fi
+}
+
+function fix_shared_mount {
+  path=$1
+  docker run -it --rm --entrypoint=sh --privileged --net=host -e sysimage=/host -v /:/host -v /dev:/dev -v /run:/run gcr.io/google_containers/hyperkube-amd64:v1.2.4 -c 'nsenter --mount=$sysimage/proc/1/ns/mnt -- mount --make-shared '$path''
 }
 
 function active_docker_machine {
