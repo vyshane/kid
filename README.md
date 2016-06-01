@@ -21,3 +21,11 @@ kid also sets up:
 
  * The [DNS addon](https://github.com/kubernetes/kubernetes/tree/master/cluster/addons/dns)
  * The [Kubernetes Dashboard](https://github.com/kubernetes/dashboard)
+
+## [Known Issue with ConfigMaps and Docker Machine](https://github.com/kubernetes/kubernetes/issues/23392)
+
+In order to get ConfigMaps to work when running Kubernetes via Docker Machine, first start your Docker Machine VM, then run:
+
+```
+docker-machine ssh $(docker-machine active) sudo mount --make-shared /
+```
