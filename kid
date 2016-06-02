@@ -43,6 +43,13 @@ function active_docker_machine {
     fi
 }
 
+function mount_filesystem_shared_if_necessary {
+    local machine=$(active_docker_machine)
+    if [ -n "$machine" ]; then
+        docker-machine ssh $machine sudo mount --make-shared /
+    fi
+}
+
 function forward_port_if_necessary {
     local port=$1
     local machine=$(active_docker_machine)
@@ -297,6 +304,8 @@ function start_kubernetes {
         echo kubectl is already configured to use an existing cluster
         exit 1
     fi
+
+    mount_filesystem_shared_if_necessary
 
     docker run \
         --name=kubelet \
