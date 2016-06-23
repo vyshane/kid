@@ -13,9 +13,17 @@ Available commands:
   restart  Restart Kubernetes
 ```
 
+## Linux
+
 On Linux kid will launch Kubernetes using the local Docker Engine.
 
-On OS X Kubernetes will be started in the boot2docker VM via Docker Machine. kid sets up port forwarding so that you can use kubectl locally without having to ssh into boot2docker.
+## macOS
+
+On macOS kid will start Kubernetes in the boot2docker VM if there is an active Docker Machine. kid then sets up port forwarding so that you can use kubectl locally without having to ssh into boot2docker.
+
+If kid detects a local installation of [Docker for macOS](https://www.docker.com/products/docker#/mac), it uses that instead.
+
+## Addons
 
 kid also sets up:
 
