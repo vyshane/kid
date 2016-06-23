@@ -30,6 +30,7 @@ function check_prerequisites {
     }
     require_command_exists kubectl
     require_command_exists docker
+    require_command_exists socat
     docker info > /dev/null
     if [ $? != 0 ]; then
         echo A running Docker engine is required. Is your Docker host up?
@@ -45,17 +46,6 @@ function check_prerequisites {
     if [ $? -eq 0 ]; then
       echo "Docker for Mac detected"
 
-      if [ "$(pinata get native/port-forwarding)" == "true" ]; then
-        pinata set native/port-forwarding false >/dev/null
-        if [ $? -ne 0 ]; then
-          echo "error setting pinata native/port-forwarding to false."
-          exit 1
-        fi
-        sleep 5
-        docker info >/dev/null 2>&1
-        while [ $? -ne 0 ]; do sleep 1 ; docker info >/dev/null 2>&1; done # wait for docker to come back
-      fi
-
       # Mount /var as shared to fix configmaps.
       fix_shared_mount "/var"
     fi
@@ -67,7 +57,7 @@ function fix_shared_mount {
 }
 
 function active_docker_machine {
-    if [ $(command -v docker-machine) ]; then
+    if [[ $(command -v docker-machine) && "$(docker-machine status)" != "Stopped" ]]; then
         docker-machine active
     fi
 }
@@ -93,17 +83,8 @@ function forward_port_if_necessary {
 
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
-      AVAHI_HOST=docker-mac
-      docker kill avahi-${AVAHI_HOST} >/dev/null 2>&1 || true ; docker rm avahi-${AVAHI_HOST} >/dev/null 2>&1 || true
-      docker run -d --name avahi-${AVAHI_HOST} --net host --restart always -e AVAHI_HOST=${AVAHI_HOST} danisla/avahi:latest >/dev/null
-
-      SCRIPTPATH=$( cd $(dirname $0) ; pwd -P )
-      [[ -h $0 ]] && SCRIPTPATH=$(dirname `readlink $0`)
-      SSH_KEY="${SCRIPTPATH}/kid_rsa.key"
-      [[ ! -f "${SSH_KEY}" ]] && ssh-keygen -t rsa -f "${SSH_KEY}" -N '' >/dev/null
-
-      docker run --name kid_ssh -d --net host -v "${SSH_KEY}.pub":/etc/ssh/keys/kid_rsa.key.pub:ro danisla/ssh-server:latest > /dev/null
-      nohup ssh -f -N -i "${SSH_KEY}" -L 8080:localhost:8080 nobody@docker-mac.local >/dev/null 2>&1 &
+      # Forward request on localhost:8080 to the kubeproxy via the kubelet container with socat.
+      nohup socat TCP-LISTEN:8080,reuseaddr,fork 'EXEC:docker exec -i kubelet "socat STDIO TCP-CONNECT:localhost:8080"' >/dev/null 2>&1 &
     fi
 }
 
@@ -120,27 +101,12 @@ function forward_canary_port_if_necessary {
 
 function remove_port_forward_if_forwarded {
     local port=$1
-    pkill -f "ssh.*docker.*$port:localhost:$port"
 
     # port-forward the canary dashboard.
     docker info | egrep -q 'Kernel Version: .*-moby'
     if [ $? -eq 0 ]; then
-      docker kill kid_ssh >/dev/null 2>&1 || true ; docker rm kid_ssh >/dev/null 2>&1 || true
-
       pkill -f "kubectl.*port-forward.*dashboard-canary.*"
-
-      # Reset the port forwarding setting.
-      if [ "$(pinata get native/port-forwarding)" == "false" ]; then
-        echo "reseting Docker for Mac native/port-forwarding = true"
-        pinata set native/port-forwarding true >/dev/null
-        if [ $? -ne 0 ]; then
-          echo "error setting pinata native/port-forwarding to true."
-          exit 1
-        fi
-        sleep 5
-        docker info >/dev/null 2>&1
-        while [ $? -ne 0 ]; do sleep 1 ; docker info >/dev/null 2>&1; done # wait for docker to come back
-      fi
+      pkill -f "socat.*TCP-LISTEN:8080.*"
     fi
 }
 
