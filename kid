@@ -57,7 +57,8 @@ function fix_shared_mount {
 }
 
 function active_docker_machine {
-    if [[ $(command -v docker-machine) && "$(docker-machine status)" != "Stopped" ]]; then
+    docker-machine active &> /dev/null
+    if [[ $? == 0 ]]; then
         docker-machine active
     fi
 }
