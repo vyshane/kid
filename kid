@@ -187,7 +187,6 @@ items:
       nodePort: $dashboard_service_nodeport  # Addition. Not present in upstream definition.
     selector:
       app: kubernetes-dashboard-canary
-    type: NodePort
 EOF
 }
 
