@@ -2,7 +2,7 @@
 #
 # kid is a helper script for launching Kubernetes in Docker
 
-KUBERNETES_VERSION=1.2.5
+KUBERNETES_VERSION=1.3.0
 KUBERNETES_API_PORT=8080
 KUBERNETES_DASHBOARD_NODEPORT=31999
 DNS_DOMAIN=cluster.local
@@ -218,7 +218,7 @@ spec:
     spec:
       containers:
       - name: etcd
-        image: gcr.io/google_containers/etcd-amd64:2.2.1
+        image: gcr.io/google_containers/etcd-amd64:2.2.5
         resources:
           # keep request = limit to keep this container in guaranteed class
           limits:
@@ -241,7 +241,7 @@ spec:
         - name: etcd-storage
           mountPath: /var/etcd/data
       - name: kube2sky
-        image: gcr.io/google_containers/kube2sky:1.12
+        image: gcr.io/google_containers/kube2sky:1.15
         resources:
           # keep request = limit to keep this container in guaranteed class
           limits:
@@ -291,7 +291,7 @@ spec:
           initialDelaySeconds: 1
           timeoutSeconds: 5
       - name: healthz
-        image: gcr.io/google_containers/exechealthz:1.0
+        image: gcr.io/google_containers/exechealthz:1.1
         resources:
           # keep request = limit to keep this container in guaranteed class
           limits:
