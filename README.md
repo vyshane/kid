@@ -1,6 +1,6 @@
 # kid - [Kubernetes](http://kubernetes.io) in [Docker](https://www.docker.com)
 
-Launch Kubernetes in Docker in one `kid up` command.
+Launch Kubernetes 1.3 in Docker in one `kid up` command.
 
 ```
  ❱ kid 
@@ -13,11 +13,11 @@ Available commands:
   restart  Restart Kubernetes
 ```
 
-## Linux
+## Linux - Local Docker
 
 On Linux kid will launch Kubernetes using the local Docker Engine.
 
-## macOS
+## macOS - Docker Machine or Docker for Mac
 
 On macOS kid will start Kubernetes in the boot2docker VM if there is an active Docker Machine. kid then sets up port forwarding so that you can use kubectl locally without having to ssh into boot2docker.
 
