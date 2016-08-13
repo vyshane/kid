@@ -2,7 +2,7 @@
 #
 # kid is a helper script for launching Kubernetes in Docker
 
-KUBERNETES_VERSION=1.3.3
+KUBERNETES_VERSION=1.3.5
 KUBERNETES_API_PORT=8080
 KUBERNETES_DASHBOARD_NODEPORT=31999
 DNS_DOMAIN=cluster.local
