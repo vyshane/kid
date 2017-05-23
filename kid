@@ -7,6 +7,7 @@ KUBERNETES_API_PORT=8080
 KUBERNETES_DASHBOARD_NODEPORT=31999
 DNS_DOMAIN=cluster.local
 DNS_SERVER_IP=10.0.0.10
+KID_CONTEXT=kid
 
 function print_usage {
     cat << EOF
@@ -92,7 +93,7 @@ function forward_canary_port_if_necessary {
   docker info | egrep -q 'Kernel Version: .*-moby'
   if [ $? -eq 0 ]; then
     # Keep port forward alive.
-    nohup bash -c 'while true; do kubectl --namespace kube-system port-forward $(kubectl --namespace kube-system get pod --selector=app=kubernetes-dashboard-canary -o jsonpath={.items..metadata.name}) '$port':9090; sleep 2; done' >/dev/null 2>&1 &
+    nohup bash -c 'while true; do '$KUBECTL' --namespace kube-system port-forward $('$KUBECTL' --namespace kube-system get pod --selector=app=kubernetes-dashboard-canary -o jsonpath={.items..metadata.name}) '$port':9090; sleep 2; done' >/dev/null 2>&1 &
     nc -z localhost 31999
     while [ $? -ne 0 ]; do sleep 1 ; nc -z localhost 31999; done
   fi
@@ -110,13 +111,13 @@ function remove_port_forward_if_forwarded {
 }
 
 function wait_for_kubernetes {
-    until $(kubectl cluster-info &> /dev/null); do
+    until $($KUBECTL cluster-info &> /dev/null); do
         sleep 1
     done
 }
 
 function create_kube_system_namespace {
-    kubectl create -f - << EOF > /dev/null
+    $KUBECTL create -f - << EOF > /dev/null
 kind: Namespace
 apiVersion: v1
 metadata:
@@ -128,7 +129,7 @@ EOF
 
 function activate_kubernetes_dashboard {
     local dashboard_service_nodeport=$1
-    kubectl create -f - << EOF > /dev/null
+    $KUBECTL create -f - << EOF > /dev/null
 # Source: https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/kubernetes-dashboard-canary.yaml
 kind: List
 apiVersion: v1
@@ -192,7 +193,7 @@ function start_dns {
     local dns_domain=$1
     local dns_server_ip=$2
 
-    kubectl create -f - << EOF > /dev/null
+    $KUBECTL create -f - << EOF > /dev/null
 apiVersion: v1
 kind: ReplicationController
 metadata:
@@ -340,20 +341,21 @@ function start_kubernetes {
     local dns_server_ip=$5
     check_prerequisites
 
-    if kubectl cluster-info 2> /dev/null; then
+    if $KUBECTL cluster-info 2> /dev/null; then
         echo kubectl is already configured to use an existing cluster
         exit 1
     fi
 
     mount_filesystem_shared_if_necessary
 
+    docker rm -f kubelet >/dev/null ||:
     docker run \
         --name=kubelet \
         --volume=/:/rootfs:ro \
         --volume=/sys:/sys:ro \
         --volume=/var/lib/docker/:/var/lib/docker:rw \
-        --volume=/var/lib/kubelet/:/var/lib/kubelet:rw,shared \
         --volume=/var/run:/var/run:rw \
+        --volume=/var/lib/kubelet/:/var/lib/kubelet:rw,shared \
         --net=host \
         --pid=host \
         --privileged=true \
@@ -370,8 +372,11 @@ function start_kubernetes {
             --allow-privileged=true --v=2 \
 	    > /dev/null
 
-    # TODO: Set and use a `kid` Kubernetes context instead of forwarding the port?
+    # TODO: Avoid forwarding the port.
     forward_port_if_necessary $kubernetes_api_port
+    kubectl config set-cluster "$KID_CONTEXT" --server=http://127.0.0.1:8080 --insecure-skip-tls-verify=true
+    kubectl config set-context "$KID_CONTEXT" --cluster="$KID_CONTEXT"
+    kubectl config use-context "$KID_CONTEXT"
 
     echo Waiting for Kubernetes cluster to become available...
     wait_for_kubernetes
@@ -385,9 +390,9 @@ function start_kubernetes {
 }
 
 function delete_kubernetes_resources {
-    kubectl delete replicationcontrollers,services,pods,secrets --all > /dev/null 2>&1 || :
-    kubectl delete replicationcontrollers,services,pods,secrets --all --namespace=kube-system > /dev/null 2>&1 || :
-    kubectl delete namespace kube-system > /dev/null 2>&1 || :
+    $KUBECTL delete replicationcontrollers,services,pods,secrets --all > /dev/null 2>&1 || :
+    $KUBECTL delete replicationcontrollers,services,pods,secrets --all --namespace=kube-system > /dev/null 2>&1 || :
+    $KUBECTL delete namespace kube-system > /dev/null 2>&1 || :
 }
 
 function delete_docker_containers {
